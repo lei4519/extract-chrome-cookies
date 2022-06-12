@@ -1,0 +1,5 @@
+#!/bin/sh
+
+cargo build --release
+
+cp target/release/extract-chrome-cookies release/extract-chrome-cookies

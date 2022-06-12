@@ -1,0 +1,17 @@
+#!/bin/bash
+
+ROOT_DIR=$(cd `dirname $0`; cd ..; pwd)
+
+# 删除仓库的 .git 目录
+if test -e $ROOT_DIR/.git
+then
+    rm -rf $ROOT_DIR/.git
+fi
+
+if test -x "/usr/local/bin/extract-chrome-cookies"
+then
+    rm /usr/local/bin/extract-chrome-cookies
+fi
+
+ln -s $ROOT_DIR/release/extract-chrome-cookies /usr/local/bin/extract-chrome-cookies
+
