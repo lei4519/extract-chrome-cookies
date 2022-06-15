@@ -46,26 +46,26 @@ struct Cookie {
 fn main() {
     let matchs = build_cli().get_matches();
 
-    run(matchs);
+    match run(matchs) {
+        Ok(_) => {}
+        Err(e) => {
+            println!("{}", e.red());
+            exit(1);
+        }
+    };
 }
 
-fn run(matchs: ArgMatches) {
+fn run(matchs: ArgMatches) -> Result<(), String> {
     let url = matchs.value_of("url").unwrap();
     let format = matchs.value_of("format").unwrap();
     let profile = matchs.value_of("profile_name").unwrap();
     let profile_path = matchs.value_of("profile_path");
 
-    let url = match Url::parse(url) {
-        Ok(url) => url,
-        Err(e) => err(&format!("URL Parse Error: {}", e)),
-    };
+    let url = Url::parse(url).map_err(|e| format!("URL Parse Error: {}", e))?;
 
-    let domain = match url.domain() {
-        Some(domain) => domain,
-        None => {
-            err("Could not parse domain from URI, format should be http://www.example.com/path/")
-        }
-    };
+    let domain = url
+        .domain()
+        .ok_or("Could not parse domain from URI, format should be http://www.example.com/path/")?;
 
     // println!("{:#?}", url);
     // println!("{:#?}", format);
@@ -77,12 +77,9 @@ fn run(matchs: ArgMatches) {
     if profile_path.is_some() {
         path = profile_path.unwrap().to_string();
     } else {
-        home_path = match get_home_path() {
-            Some(path) => path,
-            None => cant_resolve_profile_path(None),
-        };
+        home_path = get_home_path().ok_or(cant_resolve_profile_path(None)?)?;
 
-        path = get_profile_path(&home_path, profile) + "/Cookies";
+        path = get_profile_path(&home_path, profile)? + "/Cookies";
     }
 
     if !Path::new(&path).exists() {
@@ -91,21 +88,22 @@ fn run(matchs: ArgMatches) {
         } else {
             Some(home_path)
         };
-        cant_resolve_profile_path(home);
+        return Err(cant_resolve_profile_path(home)?);
     }
 
-    let connection = match Connection::open(path) {
-        Ok(v) => v,
-        Err(e) => err(&format!("Open database Failed: {e}")),
-    };
+    let connection = Connection::open(path).map_err(|e| format!("Open database Failed: {e}"))?;
 
-    let cookies = get_cookies(&connection, domain).unwrap();
+    let cookies = get_cookies(&connection, domain)?;
 
     let result = format_cookies(format, &cookies);
 
+    print!("{result}");
+
+    io::stdout().flush().unwrap();
+
     connection.close();
 
-    println!("{result}");
+    Ok(())
 }
 
 fn build_cli() -> Command<'static> {
@@ -147,12 +145,7 @@ fn build_cli() -> Command<'static> {
         )
 }
 
-fn err(msg: &str) -> ! {
-    println!("{}", msg.red());
-    exit(1);
-}
-
-fn cant_resolve_profile_path(home_path: Option<String>) -> ! {
+fn cant_resolve_profile_path(home_path: Option<String>) -> Result<String, String> {
     if home_path.is_none() {
         print!("{}\n\n", "The program can't resolve your Google profile path automatically, Please use '-p' option to pass it in manually.".red());
     } else {
@@ -164,7 +157,7 @@ fn cant_resolve_profile_path(home_path: Option<String>) -> ! {
     print!("  {}\n\n", "3. Find 'profile path'");
 
     if home_path.is_some() {
-        let path = get_profile_path(&home_path.unwrap(), "<PROFILE NAME>");
+        let path = get_profile_path(&home_path.unwrap(), "<PROFILE NAME>")?;
         print!("{}\n", "If the path looks like this:".green());
         print!("  {}\n\n", path);
         print!("{}\n", "You just pass in the profile name:".green());
@@ -182,27 +175,25 @@ fn cant_resolve_profile_path(home_path: Option<String>) -> ! {
     }
 
     print!(
-        "  {}\n",
+        "  {}",
         "extract-chrome-cookies <URL> -p <PROFILE PATH>".cyan()
     );
 
     io::stdout().flush().unwrap();
 
-    exit(1)
+    Ok(String::new())
 }
 
 fn get_home_path() -> Option<String> {
     Some(String::from(home::home_dir()?.to_str()?))
 }
 
-fn get_profile_path(home_path: &str, profile: &str) -> String {
+fn get_profile_path(home_path: &str, profile: &str) -> Result<String, String> {
     match env::consts::OS {
-        "macos" => {
-            format!("{home_path}/Library/Application Support/Google/Chrome/{profile}",)
-        }
-        "linux" => {
-            format!("{home_path}/.config/google-chrome/{profile}")
-        }
+        "macos" => Ok(format!(
+            "{home_path}/Library/Application Support/Google/Chrome/{profile}",
+        )),
+        "linux" => Ok(format!("{home_path}/.config/google-chrome/{profile}")),
         // "windows" => {
         //     let mut p = format!(
         //         "{home_path}\\AppData\\Local\\Google\\Chrome\\User Data\\{profile}\\Network"
@@ -212,49 +203,48 @@ fn get_profile_path(home_path: &str, profile: &str) -> String {
         //     }
         //     p
         // }
-        _ => err("Only Mac and Linux are supported."),
+        _ => Err("Only Mac and Linux are supported.".to_string()),
     }
 }
 
-fn get_cookies(conn: &Connection, domain: &str) -> Result<Vec<Cookie>, rusqlite::Error> {
+fn get_cookies(conn: &Connection, domain: &str) -> Result<Vec<Cookie>, String> {
     // only macos linux can go here, so value must a Some
-    let key = get_derived_key().unwrap();
+    let key = get_derived_key().ok_or("Get derived key failed.")?;
 
     let statement = format!("SELECT host_key, path, is_secure, expires_utc, name, value, encrypted_value, creation_utc, is_httponly, has_expires, is_persistent FROM cookies where host_key like '%{domain}' ORDER BY LENGTH(path) DESC, creation_utc ASC");
 
-    let mut stmt = match conn.prepare(&statement) {
-        Ok(v) => v,
-        Err(e) => err(&format!(
-            "Prepare a SQL statement for execution Failed: {e}"
-        )),
-    };
+    let mut stmt = conn
+        .prepare(&statement)
+        .map_err(|e| format!("Prepare a SQL statement for execution failed: {e}"))?;
 
-    let rows = stmt.query_map([], |row: &Row| -> Result<Cookie, rusqlite::Error> {
-        // for i in 1..11 {
-        //     println!("{i}: {:#?}", row.get_ref(i));
-        // }
-        Ok(Cookie {
-            host_key: row.get(0)?,
-            path: row.get(1)?,
-            is_secure: row.get(2)?,
-            expires_utc: row.get(3)?,
-            name: row.get(4)?,
-            value: row.get(5)?,
-            encrypted_value: row.get(6)?,
-            creation_utc: row.get(7)?,
-            is_httponly: row.get(8)?,
-            has_expires: row.get(9)?,
-            is_persistent: row.get(10)?,
+    let rows = stmt
+        .query_map([], |row: &Row| {
+            // for i in 1..11 {
+            //     println!("{i}: {:#?}", row.get_ref(i));
+            // }
+            Ok(Cookie {
+                host_key: row.get(0)?,
+                path: row.get(1)?,
+                is_secure: row.get(2)?,
+                expires_utc: row.get(3)?,
+                name: row.get(4)?,
+                value: row.get(5)?,
+                encrypted_value: row.get(6)?,
+                creation_utc: row.get(7)?,
+                is_httponly: row.get(8)?,
+                has_expires: row.get(9)?,
+                is_persistent: row.get(10)?,
+            })
         })
-    })?;
+        .map_err(|e| format!("Query Cookie Map Failed: {}", e))?;
 
     let mut cookies = vec![];
 
     for cookie in rows {
-        let mut cookie = cookie?;
+        let mut cookie = cookie.map_err(|e| format!("Get Cookie Map Failed: {}", e))?;
 
         if cookie.value.is_empty() && !cookie.encrypted_value.is_empty() {
-            cookie.value = decrypt(&key, &cookie.encrypted_value);
+            cookie.value = decrypt(&key, &cookie.encrypted_value)?;
             // if (process.platform === 'win32') {
             //   if (encryptedValue[0] == 0x01 && encryptedValue[1] == 0x00 && encryptedValue[2] == 0x00 && encryptedValue[3] == 0x00) {
             //     cookie.value = dpapi.unprotectData(encryptedValue, null, 'CurrentUser').toString('utf-8');
@@ -303,7 +293,7 @@ fn get_derived_key() -> Option<[u8; 16]> {
     }
 }
 
-fn decrypt(key: &[u8], encrypted_data: &[u8]) -> String {
+fn decrypt(key: &[u8], encrypted_data: &[u8]) -> Result<String, String> {
     let mut decipher = cbc_decryptor(crypto::aes::KeySize::KeySize128, &key, &IV, PkcsPadding);
 
     let mut final_result = Vec::<u8>::new();
@@ -326,11 +316,11 @@ fn decrypt(key: &[u8], encrypted_data: &[u8]) -> String {
                 BufferResult::BufferUnderflow => break,
                 BufferResult::BufferOverflow => {}
             },
-            Err(e) => err(&format!("{:?}", e)),
+            Err(e) => return Err(format!("Decrypt Failed: {:?}", e)),
         }
     }
 
-    String::from_utf8(final_result).unwrap()
+    String::from_utf8(final_result).map_err(|e| format!("Decrypt buffer to string failed: {}", e))
 }
 
 fn format_cookies(format: &str, cookies: &Vec<Cookie>) -> String {
