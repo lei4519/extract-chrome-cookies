@@ -14,3 +14,8 @@ home = "0.5.3"
 colored = "2"
 url = "2.2.2"
 tldextract = "0.5.1"
+
+[build-dependencies]
+clap = "3.1.18"
+clap_complete = "3.2.1"
+

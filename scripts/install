@@ -1,17 +1,30 @@
 #!/bin/bash
 
-ROOT_DIR=$(cd `dirname $0`; cd ..; pwd)
+name=extract-chrome-cookies
 
-# 删除仓库的 .git 目录
-if test -e $ROOT_DIR/.git
-then
-    rm -rf $ROOT_DIR/.git
-fi
+latest_version=$(curl -L -s -H 'Accept: application/json' https://github.com/lei4519/$name/releases/latest | sed -e 's/.*"tag_name":"\([^"]*\)".*/\1/')
 
-if test -x "/usr/local/bin/extract-chrome-cookies"
-then
-    rm /usr/local/bin/extract-chrome-cookies
-fi
+download_url=https://github.com/lei4519/$name/releases/download/$latest_version/$name.tar.gz
+ 
+cd $HOME
 
-ln -s $ROOT_DIR/release/extract-chrome-cookies /usr/local/bin/extract-chrome-cookies
+mkdir -p .$name
+
+cd .$name
+
+curl -fsSLO $download_url
+
+tar -xzvf $name.tar.gz
+
+mkdir -p /usr/local/bin
+ln -fbs $name /usr/local/bin/$name
+
+mkdir -p /usr/local/share/zsh/site-functions 
+ln -fbs _$name /usr/local/share/zsh/site-functions/_$name
+
+mkdir -p /usr/local/share/bash-completion/completions 
+lb -fbs $name.bash /usr/local/share/bash-completion/completions/$name.bash
+
+mkdir -p /usr/local/share/fish/vendor_completions.d 
+ln -fbs $name.fish /usr/local/share/fish/vendor_completions.d/$name.fish
 

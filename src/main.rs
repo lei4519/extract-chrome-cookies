@@ -1,3 +1,4 @@
+use cli::build_cli;
 use colored::*;
 use core::result::Result;
 use crypto::{
@@ -20,7 +21,9 @@ use std::{
 use tldextract::{TldExtractor, TldOption};
 use url::Url;
 
-use clap::{Arg, ArgMatches, Command};
+use clap::ArgMatches;
+
+mod cli;
 
 static SALT: &[u8; 9] = b"saltysalt";
 const KEYLENGTH: usize = 16;
@@ -52,7 +55,8 @@ fn main() {
     match run(matchs) {
         Ok(_) => {}
         Err(e) => {
-            println!("{}", e.red());
+            eprint!("{}", e.red());
+            io::stderr().flush().unwrap();
             exit(1);
         }
     };
@@ -101,78 +105,41 @@ fn run(matchs: ArgMatches) -> Result<(), String> {
     Ok(())
 }
 
-fn build_cli() -> Command<'static> {
-    Command::new("extract-chrome-cookies")
-        .version("0.0.1")
-        .about("Getting cookies by reading Chrome's cookie database on your computer.")
-        .arg(
-            Arg::new("url")
-                .required(true)
-                .help("Extract the cookie of this URL"),
-        )
-        // .arg(
-        //     Arg::new("format")
-        //         .short('f')
-        //         .takes_value(true)
-        //         .default_value("header")
-        //         .validator(|v| {
-        //             if FORMATS.contains(&v) {
-        //                 return Ok(());
-        //             }
-        //             Err(format!("{}{:?}", "Must One of ", &FORMATS))
-        //         })
-        //         .help(FORMAT_HELP),
-        // )
-        .arg(
-            Arg::new("profile_name")
-                .short('n')
-                .takes_value(true)
-                .default_value("Default")
-                .help("Chrome Profile Name"),
-        )
-        .arg(
-            Arg::new("profile_path")
-                .short('p')
-                .takes_value(true)
-                .help("Direct pass chrome profile path"),
-        )
-}
-
 fn cant_resolve_profile_path(home_path: Option<String>) -> ! {
     if home_path.is_none() {
-        print!("{}\n\n", "The program can't resolve your Google profile path automatically, Please use '-p' option to pass it in manually.".red());
+        eprint!("{}\n\n", "The program can't resolve your Google profile path automatically, Please use '-p' option to pass it in manually.".red());
     } else {
-        print!("{}\n\n", "The program can't resolve your Google profile path automatically, you need to pass it in manually.".red());
+        eprint!("{}\n\n", "The program can't resolve your Google profile path automatically, you need to pass it in manually.".red());
     }
-    print!("{}\n", "Follow these steps find your profile path:".green());
-    print!("  {}\n", "1. Open Chrome");
-    print!("  {}\n", "2. Enter 'chrome://version'");
-    print!("  {}\n\n", "3. Find 'profile path'");
+    eprint!("{}\n", "Follow these steps find your profile path:".green());
+    eprint!("  {}\n", "1. Open Chrome");
+    eprint!("  {}\n", "2. Enter 'chrome://version'");
+    eprint!("  {}\n\n", "3. Find 'profile path'");
 
     if home_path.is_some() {
         let path = get_profile_path(&home_path.unwrap(), "<PROFILE NAME>");
-        print!("{}\n", "If the path looks like this:".green());
-        print!("  {}\n\n", path);
-        print!("{}\n", "You just pass in the profile name:".green());
-        print!(
+        eprint!("{}\n", "If the path looks like this:".green());
+        eprint!("  {}\n\n", path);
+        eprint!("{}\n", "You just pass in the profile name:".green());
+        eprint!(
             "  {}\n\n",
             "extract-chrome-cookies <URL> -n <PROFILE NAME>".cyan()
         );
 
-        print!(
+        eprint!(
             "{}\n",
             "Otherwise, you need to pass in the entire profile path:".green()
         );
     } else {
-        print!("{}\n", "Run command:".green());
+        eprint!("{}\n", "Run command:".green());
     }
 
-    print!(
+    eprint!(
         "  {}",
         "extract-chrome-cookies <URL> -p <PROFILE PATH>".cyan()
     );
 
-    io::stdout().flush().unwrap();
+    io::stderr().flush().unwrap();
 
     exit(1)
 }

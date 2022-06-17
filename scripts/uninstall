@@ -1,0 +1,14 @@
+#!/bin/bash
+
+name=extract-chrome-cookies
+
+rm -f /usr/local/bin/$name
+
+rm -f /usr/local/share/zsh/site-functions/_$name
+
+rm -f /usr/local/share/bash-completion/completions/$name.bash
+
+rm -f /usr/local/share/fish/vendor_completions.d/$name.fish
+
+rm -rf $HOME/.$name
+

@@ -10,25 +10,48 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  release:
+  version: 
     runs-on: ubuntu-latest
+    outputs:
+          new_tag: ${{ steps.tag_version.outputs.new_tag }}
+          body: ${{ steps.tag_version.outputs.changelog }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-      - name: Build project
-        run: cargo build --release --locked
+
       - name: Bump version and push tag
         id: tag_version
         uses: mathieudutour/github-tag-action@v6.0
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Create a GitHub release
-        uses: ncipollo/release-action@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          name: Release ${{ steps.tag_version.outputs.new_tag }}
-          tag: ${{ steps.tag_version.outputs.new_tag }}
-          body: ${{ steps.tag_version.outputs.changelog }}
-          artifacts: "target/release/extract-chrome-cookies"
 
+  release:
+    needs: version
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset_name: extract-chrome-cookies-linux-amd64.tar.gz
+          - os: macos-latest
+            asset_name: extract-chrome-cookies-macos-amd64.tar.gz
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Build project
+        run: cargo build --release --locked && ./scripts/build
+
+      - name: Upload binary to release
+        uses: svenstaro/upload-release-action@v1-release
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: target/release/extract-chrome-cookies.tar.gz
+          asset_name: ${{ matrix.asset_name }}
+          tag: ${{ needs.version.outputs.new_tag }}
+          release_name: Release ${{ needs.version.outputs.new_tag }}
+          body: ${{ needs.version.outputs.changelog }}
+          
