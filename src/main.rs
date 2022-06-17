@@ -11,11 +11,13 @@ use crypto::{
 use keytar;
 use rusqlite::{Connection, Row};
 use std::{
+    collections::HashMap,
     env,
     io::{self, Write},
     path::Path,
     process::exit,
 };
+use tldextract::{TldExtractor, TldOption};
 use url::Url;
 
 use clap::{Arg, ArgMatches, Command};
@@ -25,22 +27,23 @@ const KEYLENGTH: usize = 16;
 const IV: [u8; 16] = [32; KEYLENGTH];
 const MAC_ITERATIONS: u32 = 1003;
 const LINUX_ITERATIONS: u32 = 1;
-const FORMATS: [&str; 4] = ["curl", "header", "json", "object"];
-const FORMAT_HELP: &str =
-    "Control how cookies are formatted, One of 'curl', 'header', 'json', 'object'";
+// const FORMATS: [&str; 6] = ["curl", "jar", "set-cookie", "puppeteer", "header", "object"];
+// const FORMAT_HELP: &str =
+//     "Control how cookies are formatted, One of 'curl', 'jar', 'set-cookie', 'puppeteer', 'header', 'object'";
+
 #[derive(Debug)]
 struct Cookie {
     host_key: String,
     path: String,
-    is_secure: u8,
-    expires_utc: usize,
+    is_secure: bool,
+    // expires_utc: usize,
     name: String,
     value: String,
     encrypted_value: Vec<u8>,
-    creation_utc: usize,
-    is_httponly: u8,
-    has_expires: u8,
-    is_persistent: u8,
+    // creation_utc: usize,
+    // is_httponly: bool,
+    // has_expires: bool,
+    // is_persistent: bool,
 }
 
 fn main() {
@@ -56,52 +59,44 @@ fn main() {
 }
 
 fn run(matchs: ArgMatches) -> Result<(), String> {
+    match env::consts::OS {
+        "macos" | "linux" => Ok(()),
+        _ => Err("Only Mac and Linux are supported.".to_string()),
+    }?;
+
     let url = matchs.value_of("url").unwrap();
-    let format = matchs.value_of("format").unwrap();
+    // let format = matchs.value_of("format").unwrap();
     let profile = matchs.value_of("profile_name").unwrap();
     let profile_path = matchs.value_of("profile_path");
 
-    let url = Url::parse(url).map_err(|e| format!("URL Parse Error: {}", e))?;
-
-    let domain = url
-        .domain()
-        .ok_or("Could not parse domain from URI, format should be http://www.example.com/path/")?;
-
-    // println!("{:#?}", url);
-    // println!("{:#?}", format);
-    // println!("{:#?}", profile);
-    // println!("{:#?}", profile_path);
-
     let path;
-    let mut home_path = String::new();
     if profile_path.is_some() {
         path = profile_path.unwrap().to_string();
     } else {
-        home_path = get_home_path().ok_or(cant_resolve_profile_path(None)?)?;
+        let home_path = get_home_path();
 
-        path = get_profile_path(&home_path, profile)? + "/Cookies";
-    }
+        if home_path.is_none() {
+            cant_resolve_profile_path(None);
+        }
 
-    if !Path::new(&path).exists() {
-        let home = if home_path.is_empty() {
-            None
-        } else {
-            Some(home_path)
-        };
-        return Err(cant_resolve_profile_path(home)?);
+        let home_path = home_path.unwrap();
+
+        path = get_profile_path(&home_path, profile) + "/Cookies";
+
+        if !Path::new(&path).exists() {
+            cant_resolve_profile_path(Some(home_path));
+        }
     }
 
     let connection = Connection::open(path).map_err(|e| format!("Open database Failed: {e}"))?;
 
-    let cookies = get_cookies(&connection, domain)?;
+    let cookies = get_cookies(&connection, url)?;
 
-    let result = format_cookies(format, &cookies);
+    let result = format_cookies(&cookies);
 
     print!("{result}");
 
     io::stdout().flush().unwrap();
-
-    connection.close();
 
     Ok(())
 }
@@ -115,26 +110,24 @@ fn build_cli() -> Command<'static> {
                 .required(true)
                 .help("Extract the cookie of this URL"),
         )
-        .arg(
-            Arg::new("format")
-                .short('f')
-                .takes_value(true)
-                .default_value("curl")
-                .validator(|v| {
-                    if FORMATS.contains(&v) {
-                        return Ok(());
-                    }
-                    Err(format!("{}{:?}", "Must One of ", &FORMATS))
-                })
-                .help(FORMAT_HELP),
-        )
+        // .arg(
+        //     Arg::new("format")
+        //         .short('f')
+        //         .takes_value(true)
+        //         .default_value("header")
+        //         .validator(|v| {
+        //             if FORMATS.contains(&v) {
+        //                 return Ok(());
+        //             }
+        //             Err(format!("{}{:?}", "Must One of ", &FORMATS))
+        //         })
+        //         .help(FORMAT_HELP),
+        // )
         .arg(
             Arg::new("profile_name")
                 .short('n')
                 .takes_value(true)
-                // TODO
-                // .default_value("Default")
-                .default_value("Profile 1")
+                .default_value("Default")
                 .help("Chrome Profile Name"),
         )
         .arg(
@@ -145,7 +138,7 @@ fn build_cli() -> Command<'static> {
         )
 }
 
-fn cant_resolve_profile_path(home_path: Option<String>) -> Result<String, String> {
+fn cant_resolve_profile_path(home_path: Option<String>) -> ! {
     if home_path.is_none() {
         print!("{}\n\n", "The program can't resolve your Google profile path automatically, Please use '-p' option to pass it in manually.".red());
     } else {
@@ -157,7 +150,7 @@ fn cant_resolve_profile_path(home_path: Option<String>) -> Result<String, String
     print!("  {}\n\n", "3. Find 'profile path'");
 
     if home_path.is_some() {
-        let path = get_profile_path(&home_path.unwrap(), "<PROFILE NAME>")?;
+        let path = get_profile_path(&home_path.unwrap(), "<PROFILE NAME>");
         print!("{}\n", "If the path looks like this:".green());
         print!("  {}\n\n", path);
         print!("{}\n", "You just pass in the profile name:".green());
@@ -181,35 +174,42 @@ fn cant_resolve_profile_path(home_path: Option<String>) -> Result<String, String
 
     io::stdout().flush().unwrap();
 
-    Ok(String::new())
+    exit(1)
 }
 
 fn get_home_path() -> Option<String> {
     Some(String::from(home::home_dir()?.to_str()?))
 }
 
-fn get_profile_path(home_path: &str, profile: &str) -> Result<String, String> {
+fn get_profile_path(home_path: &str, profile: &str) -> String {
     match env::consts::OS {
-        "macos" => Ok(format!(
-            "{home_path}/Library/Application Support/Google/Chrome/{profile}",
-        )),
-        "linux" => Ok(format!("{home_path}/.config/google-chrome/{profile}")),
-        // "windows" => {
-        //     let mut p = format!(
-        //         "{home_path}\\AppData\\Local\\Google\\Chrome\\User Data\\{profile}\\Network"
-        //     );
-        //     if !Path::new(&p).exists() {
-        //         p = format!("{home_path}\\AppData\\Local\\Google\\Chrome\\User Data\\{profile}");
-        //     }
-        //     p
-        // }
-        _ => Err("Only Mac and Linux are supported.".to_string()),
+        "macos" => format!("{home_path}/Library/Application Support/Google/Chrome/{profile}",),
+        "linux" => format!("{home_path}/.config/google-chrome/{profile}"),
+        _ => "".to_string(),
     }
 }
 
-fn get_cookies(conn: &Connection, domain: &str) -> Result<Vec<Cookie>, String> {
-    // only macos linux can go here, so value must a Some
-    let key = get_derived_key().ok_or("Get derived key failed.")?;
+fn get_cookies(conn: &Connection, url: &str) -> Result<Vec<Cookie>, String> {
+    let option = TldOption {
+        cache_path: Some(".tld_cache".to_string()),
+        private_domains: false,
+        update_local: false,
+        naive_mode: false,
+    };
+
+    let ext = TldExtractor::new(option);
+    let cant_resolve_domain =
+        "Could not parse domain from URI, format should be http://www.example.com/path/"
+            .to_string();
+    let extor = ext.extract(url).map_err(|_| &cant_resolve_domain)?;
+    let domain = extor.domain.ok_or(&cant_resolve_domain)?;
+    let suffix = extor.suffix.ok_or(&cant_resolve_domain)?;
+    let domain = format!("{domain}.{suffix}");
+
+    let url = Url::parse(url).map_err(|e| format!("URL Parse Error: {}", e))?;
+    let host = url.host_str().unwrap();
+    let path = url.path();
+    let is_https = url.scheme() == "https";
 
     let statement = format!("SELECT host_key, path, is_secure, expires_utc, name, value, encrypted_value, creation_utc, is_httponly, has_expires, is_persistent FROM cookies where host_key like '%{domain}' ORDER BY LENGTH(path) DESC, creation_utc ASC");
 
@@ -219,64 +219,121 @@ fn get_cookies(conn: &Connection, domain: &str) -> Result<Vec<Cookie>, String> {
 
     let rows = stmt
         .query_map([], |row: &Row| {
-            // for i in 1..11 {
-            //     println!("{i}: {:#?}", row.get_ref(i));
-            // }
             Ok(Cookie {
                 host_key: row.get(0)?,
                 path: row.get(1)?,
                 is_secure: row.get(2)?,
-                expires_utc: row.get(3)?,
+                // expires_utc: row.get(3)?,
                 name: row.get(4)?,
                 value: row.get(5)?,
                 encrypted_value: row.get(6)?,
-                creation_utc: row.get(7)?,
-                is_httponly: row.get(8)?,
-                has_expires: row.get(9)?,
-                is_persistent: row.get(10)?,
+                // creation_utc: row.get(7)?,
+                // is_httponly: row.get(8)?,
+                // has_expires: row.get(9)?,
+                // is_persistent: row.get(10)?,
             })
         })
         .map_err(|e| format!("Query Cookie Map Failed: {}", e))?;
 
     let mut cookies = vec![];
+    let mut de_duplicate = HashMap::new();
 
+    let mut key = None;
     for cookie in rows {
         let mut cookie = cookie.map_err(|e| format!("Get Cookie Map Failed: {}", e))?;
 
-        if cookie.value.is_empty() && !cookie.encrypted_value.is_empty() {
-            cookie.value = decrypt(&key, &cookie.encrypted_value)?;
-            // if (process.platform === 'win32') {
-            //   if (encryptedValue[0] == 0x01 && encryptedValue[1] == 0x00 && encryptedValue[2] == 0x00 && encryptedValue[3] == 0x00) {
-            //     cookie.value = dpapi.unprotectData(encryptedValue, null, 'CurrentUser').toString('utf-8');
-
-            //   } else if (encryptedValue[0] == 0x76 && encryptedValue[1] == 0x31 && encryptedValue[2] == 0x30) {
-            //     localState = JSON.parse(fs.readFileSync(os.homedir() + '/AppData/Local/Google/Chrome/User Data/Local State'));
-            //     b64encodedKey = localState.os_crypt.encrypted_key;
-            //     encryptedKey = new Buffer.from(b64encodedKey, 'base64');
-            //     key = dpapi.unprotectData(encryptedKey.slice(5, encryptedKey.length), null, 'CurrentUser');
-            //     nonce = encryptedValue.slice(3, 15);
-            //     tag = encryptedValue.slice(encryptedValue.length - 16, encryptedValue.length);
-            //     encryptedValue = encryptedValue.slice(15, encryptedValue.length - 16);
-            //     cookie.value = decryptAES256GCM(key, encryptedValue, nonce, tag).toString('utf-8');
-            //   }
-            // }
+        if cookie.is_secure && !is_https {
+            continue;
         }
+
+        if !domain_match(host, &cookie.host_key) {
+            continue;
+        }
+
+        if !path_match(path, &cookie.path) {
+            continue;
+        }
+
+        if cookie.value.is_empty() && !cookie.encrypted_value.is_empty() {
+            if key.is_none() {
+                // only macos linux can go here, so value must a Some
+                key = Some(get_derived_key().ok_or("Get derived key failed.")?);
+            }
+            cookie.value = decrypt(&key.unwrap(), &cookie.encrypted_value)?;
+        }
+
+        if de_duplicate.get(&cookie.name).is_some() {
+            continue;
+        }
+
+        de_duplicate.insert(cookie.name.clone(), 0);
 
         cookies.push(cookie);
     }
     Ok(cookies)
 }
 
+fn canonical(s: &str) -> &str {
+    if &s[0..1] == "." {
+        return &s[1..];
+    }
+    s
+}
+
+fn domain_match(mut a: &str, mut b: &str) -> bool {
+    a = canonical(a);
+    b = canonical(b);
+
+    if a == b {
+        return true;
+    }
+
+    let i = a.find(b);
+
+    if i.is_none() {
+        return false;
+    }
+    let i = i.unwrap();
+
+    if a.len() != b.len() + i {
+        return false;
+    }
+
+    if &a[i - 1..i] != "." {
+        return false;
+    }
+
+    return true;
+}
+
+fn path_match(a: &str, b: &str) -> bool {
+    if a == b {
+        return true;
+    }
+
+    let i = a.find(b);
+    if matches!(i, Some(i) if i == 0) {
+        let blen = b.len();
+        if &b[blen - 1..] == "/" {
+            return true;
+        }
+        if &a[blen..blen + 1] == "/" {
+            return true;
+        }
+    }
+
+    false
+}
+
 fn get_derived_key() -> Option<[u8; 16]> {
     match env::consts::OS {
         "macos" => {
-            // format!("{home_path}/Library/Application Support/Google/Chrome/{profile}",)
             if let Ok(res) = keytar::get_password("Chrome Safe Storage", "Chrome") {
                 if res.success {
                     let mut buffer: [u8; 16] = [0; 16];
                     let mut m = Hmac::new(Sha1::new(), res.password.as_bytes());
-                    pbkdf2(&mut m, SALT, MAC_ITERATIONS, &mut buffer);
 
+                    pbkdf2(&mut m, SALT, MAC_ITERATIONS, &mut buffer);
                     return Some(buffer);
                 }
             }
@@ -285,7 +342,7 @@ fn get_derived_key() -> Option<[u8; 16]> {
         "linux" => {
             let mut buffer: [u8; 16] = [0; 16];
             let mut m = Hmac::new(Sha1::new(), b"peanuts");
-            pbkdf2(&mut m, SALT, MAC_ITERATIONS, &mut buffer);
+            pbkdf2(&mut m, SALT, LINUX_ITERATIONS, &mut buffer);
 
             return Some(buffer);
         }
@@ -323,8 +380,9 @@ fn decrypt(key: &[u8], encrypted_data: &[u8]) -> Result<String, String> {
     String::from_utf8(final_result).map_err(|e| format!("Decrypt buffer to string failed: {}", e))
 }
 
-fn format_cookies(format: &str, cookies: &Vec<Cookie>) -> String {
+fn format_cookies(cookies: &Vec<Cookie>) -> String {
     let mut out = String::new();
+
     cookies.iter().for_each(|cookie| {
         out.push_str(&cookie.name);
         out.push('=');
@@ -333,5 +391,6 @@ fn format_cookies(format: &str, cookies: &Vec<Cookie>) -> String {
     });
     out.pop();
     out.pop();
+
     return out;
 }
