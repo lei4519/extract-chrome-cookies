@@ -24,10 +24,13 @@ jobs:
         id: tag_version
         uses: mathieudutour/github-tag-action@v6.0
         with:
+          default_bump: false
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
   release:
     needs: version
+    if: needs.version.outputs.new_tag 
+
     runs-on: ${{ matrix.os }}
 
     strategy:

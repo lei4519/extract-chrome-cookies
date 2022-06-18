@@ -2,6 +2,7 @@ use clap_complete::{
     generate_to,
     shells::{Bash, Fish, Zsh},
 };
+use clap_complete_fig::Fig;
 use std::{env, io::Error};
 
 include!("src/cli.rs");
@@ -19,6 +20,8 @@ fn main() -> Result<(), Error> {
     generate_to(Zsh, &mut cmd, name, &release_dir)?;
 
     generate_to(Fish, &mut cmd, name, &release_dir)?;
+
+    generate_to(Fig, &mut cmd, name, &release_dir)?;
 
     Ok(())
 }

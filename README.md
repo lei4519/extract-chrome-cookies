@@ -13,13 +13,13 @@ Now, using Rust to turn it into an executable binary, we can call it from anywhe
 ## Install
 
 ```sh
-git clone git@github.com:lei4519/extract-chrome-cookies.git --depth=1 $HOME/.extract-chrome-cookies && $HOME/.extract-chrome-cookies/scripts/install
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/lei4519/extract-chrome-cookies/main/scripts/install)"
 ```
 
 ## Uninstall
 
 ```sh
-extract-chrome-cookies unset-global-hook && rm /usr/local/bin/extract-chrome-cookies && rm -rf ~/.extract-chrome-cookies
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/lei4519/extract-chrome-cookies/main/scripts/uninstall)"
 ```
 
 ## Use

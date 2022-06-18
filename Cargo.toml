@@ -18,4 +18,4 @@ tldextract = "0.5.1"
 [build-dependencies]
 clap = "3.1.18"
 clap_complete = "3.2.1"
-
+clap_complete_fig = "3.2.1"
