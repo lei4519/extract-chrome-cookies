@@ -9,7 +9,6 @@ use crypto::{
     pbkdf2::pbkdf2,
     sha1::Sha1,
 };
-use keytar;
 use rusqlite::{Connection, Row};
 use std::{
     collections::HashMap,
@@ -28,8 +27,6 @@ mod cli;
 static SALT: &[u8; 9] = b"saltysalt";
 const KEYLENGTH: usize = 16;
 const IV: [u8; 16] = [32; KEYLENGTH];
-const MAC_ITERATIONS: u32 = 1003;
-const LINUX_ITERATIONS: u32 = 1;
 // const FORMATS: [&str; 6] = ["curl", "jar", "set-cookie", "puppeteer", "header", "object"];
 // const FORMAT_HELP: &str =
 //     "Control how cookies are formatted, One of 'curl', 'jar', 'set-cookie', 'puppeteer', 'header', 'object'";
@@ -292,29 +289,30 @@ fn path_match(a: &str, b: &str) -> bool {
     false
 }
 
+// #[cfg(target_os = "windows")]
+#[cfg(target_os = "linux")]
 fn get_derived_key() -> Option<[u8; 16]> {
-    match env::consts::OS {
-        "macos" => {
-            if let Ok(res) = keytar::get_password("Chrome Safe Storage", "Chrome") {
-                if res.success {
-                    let mut buffer: [u8; 16] = [0; 16];
-                    let mut m = Hmac::new(Sha1::new(), res.password.as_bytes());
+    const ITERATIONS: u32 = 1;
+    let mut buffer: [u8; 16] = [0; 16];
+    let mut m = Hmac::new(Sha1::new(), b"peanuts");
+    pbkdf2(&mut m, SALT, ITERATIONS, &mut buffer);
 
-                    pbkdf2(&mut m, SALT, MAC_ITERATIONS, &mut buffer);
-                    return Some(buffer);
-                }
-            }
-            return None;
-        }
-        "linux" => {
+    return Some(buffer);
+}
+
+#[cfg(target_os = "macos")]
+fn get_derived_key() -> Option<[u8; 16]> {
+    const ITERATIONS: u32 = 1003;
+    if let Ok(res) = keytar::get_password("Chrome Safe Storage", "Chrome") {
+        if res.success {
             let mut buffer: [u8; 16] = [0; 16];
-            let mut m = Hmac::new(Sha1::new(), b"peanuts");
-            pbkdf2(&mut m, SALT, LINUX_ITERATIONS, &mut buffer);
+            let mut m = Hmac::new(Sha1::new(), res.password.as_bytes());
 
+            pbkdf2(&mut m, SALT, ITERATIONS, &mut buffer);
             return Some(buffer);
         }
-        _ => None,
     }
+    return None;
 }
 
 fn decrypt(key: &[u8], encrypted_data: &[u8]) -> Result<String, String> {

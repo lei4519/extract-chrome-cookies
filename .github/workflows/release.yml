@@ -25,6 +25,7 @@ jobs:
         uses: mathieudutour/github-tag-action@v6.0
         with:
           default_bump: false
+          custom_release_rules: refactor:patch:refactor
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
   release:
@@ -46,7 +47,9 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Build project
-        run: cargo build --release --locked && ./scripts/build
+        run: |
+          sed -i -e 's/version([^)]*)/version("${{ needs.version.outputs.new_tag }}")/g' src/cli.rs
+          cargo build --release --locked && ./scripts/build
 
       - name: Upload binary to release
         uses: svenstaro/upload-release-action@v1-release
@@ -57,4 +60,7 @@ jobs:
           tag: ${{ needs.version.outputs.new_tag }}
           release_name: Release ${{ needs.version.outputs.new_tag }}
           body: ${{ needs.version.outputs.changelog }}
-          
+
+      - name: Rollback
+        if: failure()
+        run: git push --delete origin ${{ needs.version.outputs.new_tag }}

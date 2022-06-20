@@ -7,7 +7,6 @@ edition = "2021"
 
 [dependencies]
 rusqlite = "0.27.0"
-keytar = "0.1.6"
 rust-crypto = "0.2.36"
 clap = "3.1.18"
 home = "0.5.3"
@@ -15,7 +14,12 @@ colored = "2"
 url = "2.2.2"
 tldextract = "0.5.1"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+keytar = "0.1.6"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+winapi = "0.3.9"
+
 [build-dependencies]
 clap = "3.1.18"
 clap_complete = "3.2.1"
-clap_complete_fig = "3.2.1"

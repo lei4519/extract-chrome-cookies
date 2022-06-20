@@ -4,5 +4,5 @@ name=extract-chrome-cookies
 
 cd ./target/release
 
-tar -czvf $name.tar.gz $name _$name $name.bash $name.fish $name.ts
+tar -czvf $name.tar.gz $name _$name $name.bash $name.fish
 

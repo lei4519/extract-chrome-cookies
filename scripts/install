@@ -46,9 +46,3 @@ ln -f -s $HOME/.$name/$name.bash /usr/local/share/bash-completion/completions/$n
 mkdir -p /usr/local/share/fish/vendor_completions.d 
 ln -f -s $HOME/.$name/$name.fish /usr/local/share/fish/vendor_completions.d/$name.fish
 
-if test -x $HOME/.fig 
-then
-  mkdir -p $HOME/.fig/autocomplete/build
-  ln -f -s $HOME/.$name/$name.ts $HOME/.fig/autocomplete/build/$name.ts
-fi
-
