@@ -28,12 +28,6 @@ Now, using Rust to turn it into an executable binary, we can call it from anywhe
 extract-chrome-cookies https://google.com
 ```
 
-- Format cookies 
-
-```sh
-extract-chrome-cookies -f curl https://google.com
-```
-
 - For more details
 
 ```sh
