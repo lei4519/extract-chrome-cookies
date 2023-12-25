@@ -69,6 +69,7 @@ fn run(matchs: ArgMatches) -> Result<(), String> {
     // let format = matchs.value_of("format").unwrap();
     let profile = matchs.value_of("profile_name").unwrap();
     let profile_path = matchs.value_of("profile_path");
+    let browser = matchs.value_of("browser").unwrap().to_lowercase();
 
     let path;
     if profile_path.is_some() {
@@ -77,21 +78,21 @@ fn run(matchs: ArgMatches) -> Result<(), String> {
         let home_path = get_home_path();
 
         if home_path.is_none() {
-            cant_resolve_profile_path(None);
+            cant_resolve_profile_path(None, &browser);
         }
 
         let home_path = home_path.unwrap();
 
-        path = get_profile_path(&home_path, profile) + "/Cookies";
+        path = get_profile_path(&home_path, &browser, profile) + "/Cookies";
 
         if !Path::new(&path).exists() {
-            cant_resolve_profile_path(Some(home_path));
+            cant_resolve_profile_path(Some(home_path), &browser);
         }
     }
 
     let connection = Connection::open(path).map_err(|e| format!("Open database Failed: {e}"))?;
 
-    let cookies = get_cookies(&connection, url)?;
+    let cookies = get_cookies(&connection, url, &browser)?;
 
     let result = format_cookies(&cookies);
 
@@ -102,7 +103,7 @@ fn run(matchs: ArgMatches) -> Result<(), String> {
     Ok(())
 }
 
-fn cant_resolve_profile_path(home_path: Option<String>) -> ! {
+fn cant_resolve_profile_path(home_path: Option<String>, browser: &str) -> ! {
     if home_path.is_none() {
         eprint!("{}\n\n", "The program can't resolve your Google profile path automatically, Please use '-p' option to pass it in manually.".red());
     } else {
@@ -114,7 +115,7 @@ fn cant_resolve_profile_path(home_path: Option<String>) -> ! {
     eprint!("  {}\n\n", "3. Find 'profile path'");
 
     if home_path.is_some() {
-        let path = get_profile_path(&home_path.unwrap(), "<PROFILE NAME>");
+        let path = get_profile_path(&home_path.unwrap(), &browser, "<PROFILE NAME>");
         eprint!("{}\n", "If the path looks like this:".green());
         eprint!("  {}\n\n", path);
         eprint!("{}\n", "You just pass in the profile name:".green());
@@ -145,15 +146,26 @@ fn get_home_path() -> Option<String> {
     Some(String::from(home::home_dir()?.to_str()?))
 }
 
-fn get_profile_path(home_path: &str, profile: &str) -> String {
+fn get_profile_path(home_path: &str, browser: &str, profile: &str) -> String {
+    // path: https://github.com/borisbabic/browser_cookie3/blob/master/browser_cookie3/__init__.py
+    let browser_path_osx = match browser {
+        "chrome" => "Google/Chrome",
+        "edge" => "Microsoft Edge",
+        _ => return "".to_string(),
+    };
+    let browser_path_linux = match browser {
+        "chrome" => "google-chrome",
+        "edge" => "microsoft-edge",
+        _ => return "".to_string(),
+    };
     match env::consts::OS {
-        "macos" => format!("{home_path}/Library/Application Support/Google/Chrome/{profile}",),
-        "linux" => format!("{home_path}/.config/google-chrome/{profile}"),
+        "macos" => format!("{home_path}/Library/Application Support/{browser_path_osx}/{profile}"),
+        "linux" => format!("{home_path}/.config/{browser_path_linux}/{profile}"),
         _ => "".to_string(),
     }
 }
 
-fn get_cookies(conn: &Connection, url: &str) -> Result<Vec<Cookie>, String> {
+fn get_cookies(conn: &Connection, url: &str, browser: &str) -> Result<Vec<Cookie>, String> {
     let option = TldOption {
         cache_path: Some(".tld_cache".to_string()),
         private_domains: false,
@@ -221,7 +233,7 @@ fn get_cookies(conn: &Connection, url: &str) -> Result<Vec<Cookie>, String> {
         if cookie.value.is_empty() && !cookie.encrypted_value.is_empty() {
             if key.is_none() {
                 // only macos linux can go here, so value must a Some
-                key = Some(get_derived_key().ok_or("Get derived key failed.")?);
+                key = Some(get_derived_key(browser).ok_or("Get derived key failed.")?);
             }
             cookie.value = decrypt(&key.unwrap(), &cookie.encrypted_value)?;
         }
@@ -291,7 +303,7 @@ fn path_match(a: &str, b: &str) -> bool {
 
 // #[cfg(target_os = "windows")]
 #[cfg(target_os = "linux")]
-fn get_derived_key() -> Option<[u8; 16]> {
+fn get_derived_key(browser: &str) -> Option<[u8; 16]> {
     const ITERATIONS: u32 = 1;
     let mut buffer: [u8; 16] = [0; 16];
     let mut m = Hmac::new(Sha1::new(), b"peanuts");
@@ -301,9 +313,14 @@ fn get_derived_key() -> Option<[u8; 16]> {
 }
 
 #[cfg(target_os = "macos")]
-fn get_derived_key() -> Option<[u8; 16]> {
+fn get_derived_key(browser: &str) -> Option<[u8; 16]> {
     const ITERATIONS: u32 = 1003;
-    if let Ok(res) = keytar::get_password("Chrome Safe Storage", "Chrome") {
+    let (service, account) = match browser {
+        "chrome" => ("Chrome Safe Storage", "Chrome"),
+        "edge" => ("Microsoft Edge Safe Storage", "Microsoft Edge"),
+        _ => return None,
+    };
+    if let Ok(res) = keytar::get_password(service, account) {
         if res.success {
             let mut buffer: [u8; 16] = [0; 16];
             let mut m = Hmac::new(Sha1::new(), res.password.as_bytes());

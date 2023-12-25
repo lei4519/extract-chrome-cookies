@@ -23,6 +23,13 @@ pub fn build_cli() -> Command<'static> {
         //         .help(FORMAT_HELP),
         // )
         .arg(
+            Arg::new("browser")
+                .short('b')
+                .takes_value(true)
+                .default_value("chrome")
+                .help("Browser Name: chrome[default], edge"),
+        )
+        .arg(
             Arg::new("profile_name")
                 .short('n')
                 .takes_value(true)
